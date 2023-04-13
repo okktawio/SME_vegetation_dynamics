@@ -47,29 +47,29 @@ def simulan(n0 = 1e-4, k = ones((100,)), r = 1e-2, modelo = brody):
         n[i] = m
     return n
 
-def leeclima(loi, lai):
+def leeclima(fclim):
     """
     Read climate data series from an numpy array containing daily data
     """
-    y,x = (int((round(lai,1) + 42.0)*10), int((round(loi,1) + 73) * 10))
-    climaf = load("datos_clima_eras5_patnor.npz")
+    climaf = load(fclim)
     t0 = time.mktime((2000,1,1,0,0,0,0,0,0))
-    tiempo = (climaf["tiempo"] - t0) / (86400 * 365.25) + 2000
+    tiempo = (climaf["time"] - t0) / (86400 * 365.25) + 2000
     clima = empty((tiempo.shape[0],5))
     clima[:,0] = tiempo
 
-    clima[:,1] = climaf["temperaturas"][:,y,x]
-    clima[:,2] = climaf["lluvias"][:,y,x]
-    #clima[:,5] = climaf["ETP"][:,y,x]
-    clima[:,4] = climaf["radiacion"][:,y,x] / 10000000.0
-    clima[:,3] = climaf["evaporacion"][:,y,x]
-    #print(tiempo[-10:])
+    clima[:,1] = climaf["temperature"][:,y,x]
+    clima[:,2] = climaf["rain"][:,y,x]
+    clima[:,4] = climaf["radiation"][:,y,x] / 10000000.0
+    clima[:,3] = climaf["evaporation"][:,y,x]
     return (clima)
 
 from scipy.special import logit, expit
 from scipy.optimize import fmin_bfgs, fmin_l_bfgs_b
 
 def convolclima(params, clima):
+    """
+    Convolute rainfal time series with a gamma distribution
+    """
     transf = fft.fft(clima)
     from scipy.stats import gamma
     curva = gamma.pdf(arange(clima.shape[0]), params[0], scale = params[1])
@@ -79,6 +79,9 @@ def convolclima(params, clima):
     return clest
 
 def klineal_clima(params, modelo, climat, clima, nt, t0, ajuste = True):
+    """
+    Lineal variation of K as a function of climate
+    """
     inn = where(abs(climat - t0) < 1/365)[0][0]
     ini = inn - 400
     fin = where(abs(climat - nt[-1]) < 1/365)[0][-1] + 30
@@ -108,6 +111,9 @@ def klineal_clima(params, modelo, climat, clima, nt, t0, ajuste = True):
 
 
 def ajuste(params, climat, clima, nt, ndvi, modelo = 5, t0 = 2000):
+    """
+    Fit calculation using minimum squares
+    """
     aj0 = 0
     estima, Kc = klineal_clima(params, modelo, climat, clima, nt, t0)
     ajj = sum((ndvi - estima) ** 2) + aj0
@@ -115,7 +121,9 @@ def ajuste(params, climat, clima, nt, ndvi, modelo = 5, t0 = 2000):
 
 
 def randomfit(nt, ndvi, lerror, climav, climat, ventana = 46, i = 46, modelo = 5, t0 = 2000, sdmax = 0.1, iteraciones = 10, actualiza = False, hijos = 1024, rmxx = 0, rmnn = -1):
-    
+    """
+    Fit random generated atoms as a function of climate
+    """
     from multiprocessing import Pool, TimeoutError
     pool = Pool(processes=8)
     
@@ -126,9 +134,6 @@ def randomfit(nt, ndvi, lerror, climav, climat, ventana = 46, i = 46, modelo = 5
     
     bounds = array([[0,1],[-20,20],[-2,2],[-20,20],[-2,2],[-20,20],[-100,1000],[0,200],[0,200],[0,100]])
     sdp    = array([ 0.1,        1,  0.1,       1,  0.1,       1,       1,      1,     50,     1])
-    
-    
-    
         
     ntt = nt[(i-ventana):i]
     ive = ndvi[(i-ventana):i]
@@ -158,7 +163,6 @@ def randomfit(nt, ndvi, lerror, climav, climat, ventana = 46, i = 46, modelo = 5
     elif actualiza:
         sdp[0] = 1e-2
 
-    #sdp[0] *= max(abs(ndvi[0] - lerror[0][3][0])/0.2, 1)
         
     j = 0
     while (j < iteraciones or lerror[0][4] <= rmxx or lerror[-1][4] <= rmnn) and j < 100:
@@ -216,19 +220,17 @@ def main(ve = 46):
     #import modulse containing the database management for the output
     from SME_sqlite import creabase, guardadato
     #load data from the last parameter in the command line
-    a1 = load(sys.argv[-3])
+    a1 = load(sys.argv[-1])
 
     
     try:
-        creabase(sys.argv[-3])
+        creabase(sys.argv[-1])
     except: pass
     
     ndvi = a1["cubo"][0,0]/10000
     nt = a1["nt"][0,0]
     ndvi = interpola(ndvi, nt)
-    coords = float(sys.argv[-2]), float(sys.argv[-1])
-    clima = leeclima(coords[0], coords[1])
-
+    clima = leeclima(sys.argv[-2])
     optimos = array([0.6134,  4.8331,  0.0129,  3.2775,  0.1159, -2.1898,  8.7557,  6.7986, 45.6596,  7.1825])
     aparams = zeros((nt.shape[0], 256, optimos.shape[0])) - 1e9
     ar2 = zeros((nt.shape[0], 256)) - 1e9
@@ -250,7 +252,7 @@ def main(ve = 46):
 
     ID = 0
     for i in range(len(lerror)):
-        guardadato(sys.argv[-3], lerror[i], nt, ve, ve, ID)
+        guardadato(sys.argv[-1], lerror[i], nt, ve, ve, ID)
         ID += 1
     
     for i in range(ve + 1, nt.shape[0]):
@@ -260,7 +262,7 @@ def main(ve = 46):
             warnings.filterwarnings("ignore")
             lerror = randomfit(nt, ndvi, lerror, clima[:,1:], clima[:,0], ventana = ve, i = i, modelo = 5, sdmax = 0.1, t0 = nt[i-ve-1], iteraciones = 1, actualiza = True, rmnn = lerror[-1][4] - 0.5)
         for i in range(len(lerror)):
-            guardadato(sys.argv[-3], lerror[i], nt, i, ve, ID)
+            guardadato(sys.argv[-1], lerror[i], nt, i, ve, ID)
             ID += 1
 
 if __name__ == "__main__": main()
