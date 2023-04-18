@@ -221,46 +221,61 @@ def main(ve = 46):
     from SME_sqlite import creabase, guardadato
     #load data from the last parameter in the command line
     a1 = load(sys.argv[-1])
-
-    
+    #create the database with the output from the model
     try:
         creabase(sys.argv[-1])
     except: pass
-    
+
+    #NDVI time series
     ndvi = a1["cubo"][0,0]/10000
-    nt = a1["nt"][0,0]
-    ndvi = interpola(ndvi, nt)
-    clima = leeclima(sys.argv[-2])
+    #date time series
+    nt      = a1["nt"][0,0]
+    #interpolate to remove invalid values
+    ndvi    = interpola(ndvi, nt)
+    #read climate database
+    clima   = leeclima(sys.argv[-2])
+    #initial fitting values
     optimos = array([0.6134,  4.8331,  0.0129,  3.2775,  0.1159, -2.1898,  8.7557,  6.7986, 45.6596,  7.1825])
+    #fitting params vector
     aparams = zeros((nt.shape[0], 256, optimos.shape[0])) - 1e9
+    #r2 vector
     ar2 = zeros((nt.shape[0], 256)) - 1e9
+    #estimation vector
     aest = zeros((nt.shape[0], 256 * ve)) - 1e9
-    
+
+    #error initialization for eight atoms
     lerror = []
     for i in range(8):
         lerror.append([88, i, optimos, 0, 0, 0, [[],[],[],[],[]]])
 
+    #initial fitting for the algorithm
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore")
-        lerror = randomfit(nt, ndvi, lerror, clima[:,1:], clima[:,0], ventana = 46, i = 46, modelo = 5, sdmax = 1, t0 = nt[0] - 16/365, iteraciones=1)
+        lerror = randomfit(nt, ndvi, lerror, clima[:,1:], clima[:,0], ventana = 46, i = 46, modelo = 5, sdmax = 1, t0 = nt[0] - 16/365, iteraciones = 1)
 
+    #second initialization using simulated annealing
     for sdi in linspace(0,-1.2,7):
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
             lerror = randomfit(nt, ndvi, lerror, clima[:,1:], clima[:,0], ventana = 46, i = 46, modelo = 5, sdmax = power(10, sdi), t0 = nt[0] - 16/365, iteraciones = 10, rmnn = lerror[len(lerror)//2][4])
         #optimos = lerror[0][2]
 
+    #saving initial fitted atoms
     ID = 0
     for i in range(len(lerror)):
         guardadato(sys.argv[-1], lerror[i], nt, ve, ve, ID)
         ID += 1
-    
+
+    #fitting sequentially though the time series using sliding windows
     for i in range(ve + 1, nt.shape[0]):
+        #initializing the error for the iteration
         for l in range(len(lerror)):
             lerror[l][2][0] = lerror[l][3][1]
+        #fitting the model in the window
         with warnings.catch_warnings():
             warnings.filterwarnings("ignore")
             lerror = randomfit(nt, ndvi, lerror, clima[:,1:], clima[:,0], ventana = ve, i = i, modelo = 5, sdmax = 0.1, t0 = nt[i-ve-1], iteraciones = 1, actualiza = True, rmnn = lerror[-1][4] - 0.5)
+        #saving the output in a database
         for i in range(len(lerror)):
             guardadato(sys.argv[-1], lerror[i], nt, i, ve, ID)
             ID += 1
